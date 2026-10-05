@@ -1,275 +1,192 @@
 ---
-name: task-planning
-description: Use only when the user explicitly asks to plan first or includes this file in a promot. Plan non-trivial work before executing it. Apply before writing code, modifying files, creating artifacts, making state-changing tool calls, or otherwise carrying out the work.
+name: planning-mode
+description: Use only when the user explicitly asks to plan first (for example "/plan", "plan this", "let's plan first") or includes this file in a prompt. Produces a system-aware, execution-ready plan as a handoff to another agent. Never implements the plan; the only permitted write is the plan file in `plans/`.
 ---
 
-# Task Planning
+# Planning Mode
 
 ## Overview
 
-Plan the work before performing it. Turn the request into an execution-ready sequence with clear scope, dependencies, outputs, and verification so the execution phase does not have to rediscover the approach.
+Plan the work; do not perform it. Turn the request into a system-aware, execution-ready plan that another agent can implement without rediscovering the approach. Treat every requested change as a system change, not an isolated patch, and find the smallest implementation that stays coherent with the architecture, lifecycle, and future evolution of the system.
 
-Briefly announce, in the user's language, that the task will be planned before execution.
+Briefly announce, in the user's language, that the task will be planned and handed off.
 
 <HARD-GATE>
-Do not begin implementation or execution until the plan is complete and has passed the self-review in this skill.
+No implementation or execution happens in this skill.
 
-Before the gate is cleared, do not:
-- write implementation code,
-- modify project or user files,
-- create final deliverables,
-- make state-changing tool calls,
-- perform irreversible actions,
-- silently start parts of the requested work "while planning."
+Allowed:
+- Read-only exploration: read files, search paths, symbols, text, diagnostics, tests, and existing patterns.
+- Asking the user clarifying questions.
+- Creating or updating the plan file in `plans/` (and creating `plans/` if it does not exist).
+- Describing commands, tests, migrations, or steps that the implementing agent should run later.
 
-Read-only exploration needed to understand the task is allowed and encouraged.
+Forbidden:
+- Writing implementation code or modifying any file other than the plan file.
+- Creating final deliverables, making state-changing tool calls, or performing irreversible actions.
+- Running commands, scripts, Git operations, formatters, or generators that change state.
+- Delegating to another agent to obtain write access or perform implementation.
+- Silently starting parts of the requested work "while planning."
+
+If an action would require writing anywhere else, do not perform it; record it as a step in the plan.
 </HARD-GATE>
+
+## Planning Doctrine
+
+- **Think broadly, implement narrowly.** Analyze the surrounding system before deciding where the change belongs.
+- **Every change has system implications.** Consider data flow, state ownership, interfaces, lifecycle, failure modes, and future extension.
+- **Prefer authoritative, derivable designs.** If state or control flow can be derived from existing events, persisted state, shared protocols, or abstractions, prefer that over inventing new transient state.
+- **Choose the smallest coherent solution.** Do not default to the smallest local patch if it distorts the architecture or adds hidden follow-on complexity.
+- **Expand scope only when it simplifies the system.** Widen the change only when a local fix would create duplicated state, fragile coupling, or lifecycle mismatches.
+- **Do not gold-plate.** Keep scope tied to the user's goal.
 
 ## Choose Planning Depth
 
-Classify the task before writing the plan. Scale the ceremony, not the planning gate.
+Classify the task first. Scale the ceremony, not the gate. When uncertain, choose the deeper level.
 
-### Lightweight
-Use for a small, well-bounded, reversible task with few dependencies.
-- Write a compact plan of roughly 3-6 steps.
-- State the intended result and the verification method.
-- Avoid unnecessary architecture or process discussion.
+- **Lightweight** — small, well-bounded, reversible. Compact plan of 1–3 tasks; skip sections that add nothing.
+- **Standard** — several files, tools, or deliverables. Map dependencies and affected areas; break work into independently verifiable tasks.
+- **Deep** — architectural, cross-system, risky, or ambiguous. Identify assumptions, failure modes, and rollback needs; compare approaches when a decision materially affects the result; add checkpoints before irreversible actions.
 
-### Standard
-Use for multi-step work involving several files, tools, sources, or deliverables.
-- Map dependencies and affected areas.
-- Break work into independently verifiable tasks.
-- Include expected outputs and checks for each task.
+## Workflow
 
-### Deep
-Use for architectural, cross-system, high-impact, expensive, risky, or highly ambiguous work.
-- Inspect relevant context before committing to an approach.
-- Identify assumptions, constraints, dependencies, failure modes, and rollback or recovery needs.
-- Compare approaches when a design decision materially affects the result.
-- Add explicit checkpoints before irreversible or consequential actions.
+### 1. Understand the outcome
 
-When uncertain between two levels, use the deeper level. If hidden complexity appears during execution, stop execution, update the plan, re-run self-review, then continue.
+Extract the user's actual goal, required deliverables, constraints, success criteria, sequencing requirements, and what is explicitly out of scope. Do not confuse the requested method with the underlying goal. Preserve explicit user constraints exactly.
 
-## Planning Workflow
+### 2. Explore
 
-Follow these steps in order.
+Explore before designing or asking questions.
 
-### 1. Understand the requested outcome
+- Read relevant files and understand existing patterns, architecture, and conventions.
+- Trace the end-to-end flow, not just the local change point.
+- Identify the source of truth, state ownership, subsystem boundaries, and invariants.
+- Identify the lifecycle: trigger, processing, intermediate states, completion, side effects, failure, retry, and cleanup where applicable.
+- Search for similar features and prior art.
+- Inspect relevant tests and verification patterns.
 
-Extract:
-- the user's actual goal,
-- required deliverables,
-- constraints and preferences,
-- success criteria,
-- deadlines or sequencing requirements,
-- actions that are explicitly out of scope.
+### 3. Clarify
 
-Do not confuse the requested method with the underlying goal. Preserve explicit user constraints exactly.
+Ask only questions that would materially change the plan and cannot be answered from the codebase or existing context. If the task can be planned safely with a stated assumption, state the assumption instead of blocking. Separate known facts from assumptions.
 
-### 2. Inspect available context
+### 4. Design
 
-Before asking questions, inspect the context that can answer them:
-- relevant files and folders,
-- existing code or documents,
-- prior conversation context,
-- connected systems or read-only tool data,
-- conventions already established by the project.
+Consider both the most direct and the most system-coherent implementation. Choose the direct one only when it introduces no architectural distortion, duplicated state, fragile coupling, or lifecycle mismatch.
 
-Follow existing patterns unless the task specifically requires changing them.
+Before converging, answer:
 
-Ask a clarifying question only when a missing answer would materially change the plan and cannot be resolved from available context. If the task can be planned safely with a stated assumption, state the assumption instead of blocking progress.
+1. What part of the system is actually changing?
+2. What is the source of truth before and after?
+3. What new state, transitions, or invariants are introduced?
+4. What components, flows, or interfaces depend on this decision?
+5. Does this duplicate logic or state anywhere?
+6. Is there a more system-coherent place to implement this?
+7. What is the smallest solution that keeps the system coherent?
 
-### 3. Identify dependencies and uncertainty
+### 5. Decompose into tasks
 
-List the things execution depends on, including:
-- prerequisite information,
-- files, systems, or tools,
-- decisions that affect later steps,
-- external dependencies,
-- permissions or approvals,
-- ordering constraints.
+Make each task a coherent unit with an independently checkable result. A good boundary lets a reviewer approve one task while rejecting the next. Fold trivial setup into the task that needs it. Order tasks by dependency.
 
-Separate known facts from assumptions. Do not hide uncertainty inside a confident-looking plan.
+For each task, specify objective, inputs, dependencies, concrete actions, output, and verification. Use exact paths, commands, schemas, or acceptance criteria when known.
 
-### 4. Map the work surface
+For implementation-heavy work, prefer the cycle: reproduce current state → make the smallest intended change → run focused verification → fix failures → run broader verification.
 
-Identify what will be touched before defining tasks.
+### 6. Self-review
 
-For software work, map:
-- files to create or modify,
-- interfaces or data contracts,
-- tests,
-- configuration,
-- documentation.
+Review the complete plan and fix issues inline — do not merely report them.
 
-For research or analysis, map:
-- questions to answer,
-- sources or datasets to inspect,
-- evidence required,
-- synthesis method,
-- output format.
+1. **Assumptions** — Re-read the critical files the design depends on and verify assumptions.
+2. **Goal coverage** — Every requested outcome maps to at least one task, and the plan matches the user's intent.
+3. **System impact** — Lifecycle, failure, and cleanup are covered; widened scope is justified by simpler system behavior.
+4. **Ordering** — Dependencies are satisfied before they are consumed.
+5. **Specificity** — An executor could follow each step without inventing missing details.
+6. **Verification** — Every meaningful task has a success check.
+7. **Consistency** — Names, paths, interfaces, and formats stay consistent across tasks.
+8. **Risk** — Irreversible or consequential actions are identified and gated.
+9. **No placeholders** — See below.
 
-For documents or creative artifacts, map:
-- audience and purpose,
-- source material,
-- structure,
-- artifact(s) to create,
-- quality checks.
+### No Placeholders
 
-For tool or operational workflows, map:
-- tools or systems involved,
-- read actions versus write actions,
-- state changes,
-- validation and recovery steps.
+Treat these as planning failures and replace them with the actual decision, action, or acceptance criterion:
 
-### 5. Decompose into execution tasks
-
-Make each task a coherent unit that produces a meaningful, independently checkable result.
-
-A good task boundary lets a reviewer reasonably approve one task while rejecting or revising the next. Fold trivial setup into the task that needs it; do not create ceremony-only tasks.
-
-Order tasks by dependency. Do not schedule a task before the information or output it consumes exists.
-
-### 6. Make every task executable
-
-For every task, specify:
-- **Objective:** what this task accomplishes.
-- **Inputs:** what it needs from the user, context, or earlier tasks.
-- **Actions:** the concrete steps to perform.
-- **Output:** the artifact, state, or decision produced.
-- **Verification:** how to confirm the task succeeded.
-- **Dependencies:** earlier tasks or external conditions it relies on, when relevant.
-
-Use exact paths, commands, tool names, query targets, schemas, or acceptance criteria when they are known and useful.
-
-For implementation-heavy work, make individual actions small enough to execute and verify without re-planning. Prefer a cycle such as:
-1. establish or reproduce the current state,
-2. make the smallest intended change,
-3. run the focused verification,
-4. fix failures,
-5. run broader verification before moving on.
-
-### 7. Define completion criteria
-
-End the plan with concrete conditions for "done." Include the checks that matter for the task, such as:
-- tests pass,
-- output renders correctly,
-- required sections exist,
-- source claims are supported,
-- state changes are confirmed,
-- no unintended files or records changed,
-- final artifact is available at the intended location.
-
-### 8. Run self-review
-
-Review the complete plan before execution. Fix issues inline.
-
-Check:
-1. **Goal coverage** — Does every requested outcome map to at least one task?
-2. **Ordering** — Are dependencies satisfied before they are consumed?
-3. **Specificity** — Could an executor follow each step without inventing missing details?
-4. **Verification** — Does each meaningful task have a success check?
-5. **Consistency** — Do names, paths, interfaces, formats, and assumptions stay consistent across tasks?
-6. **Scope** — Does the plan avoid unrelated improvements and unnecessary work?
-7. **Risk** — Are irreversible or consequential actions identified and gated appropriately?
-8. **Placeholder scan** — Remove vague placeholders and deferred thinking.
-
-Do not merely report self-review problems. Correct the plan before continuing.
+- "TBD", "TODO", "figure this out later"
+- "implement the feature" without the implementation path
+- "add validation" / "handle edge cases" / "write tests" without naming what
+- "check everything works" without an observable check
+- "similar to the previous task" when execution depends on exact details
+- references to files, functions, or artifacts the plan never defines
 
 ## Plan Output Format
 
-Use this structure by default. Compress it for Lightweight tasks and expand it for Deep tasks.
+Compress for Lightweight, expand for Deep. Keep only the recommended approach, not every alternative considered.
 
 ```markdown
-# [Task Name] Plan
+# Plan: <task title>
 
-**Goal:** [One sentence describing the desired end state]
+**Planning depth:** Lightweight | Standard | Deep
+**Status:** Ready for review
 
-**Planning depth:** [Lightweight | Standard | Deep]
+## Summary
+1–2 sentences on the task and the chosen approach.
 
-**Success criteria:**
-- [Observable condition]
-- [Observable condition]
+## Success criteria
+- <observable condition>
 
-**Constraints / assumptions:**
-- [Constraint or explicit assumption]
+## Context
+Key findings: existing patterns, relevant files, constraints, and assumptions.
 
-**Work surface:**
-- [Files, systems, sources, artifacts, or components affected]
+## System Impact
+Effects on source of truth, data flow, interfaces, lifecycle, and dependent parts of the system.
 
-## Task 1: [Outcome-oriented name]
+## Approach
+The recommended design and why it is the smallest coherent solution.
 
-**Objective:** [What this task accomplishes]
-**Inputs:** [Required context or prior outputs]
-**Dependencies:** [None or exact dependency]
+## Changes
+- `path/to/file` — what changes and why
 
-- [ ] [Concrete action]
-- [ ] [Concrete action]
-- [ ] [Verification action]
+## Task 1: <outcome-oriented name>
+**Objective:** <what this accomplishes>
+**Inputs / dependencies:** <required context or prior tasks>
 
-**Output:** [Expected result]
-**Verification:** [Exact success check]
+- [ ] <concrete action>
+- [ ] <verification action>
 
-## Task 2: [Outcome-oriented name]
-...
+**Output:** <expected result>
+**Verification:** <exact success check>
+
+## Task 2: ...
 
 ## Final verification
-- [ ] [End-to-end check]
-- [ ] [Quality / regression / completeness check]
+- [ ] <end-to-end check>
+- [ ] <regression / completeness check>
+- [ ] No unintended files or records changed
 ```
-
-## No Placeholders
-
-Do not write plan steps that merely postpone thinking. Treat these as planning failures:
-- "TBD", "TODO", "figure this out later",
-- "implement the feature" without describing the implementation path,
-- "add validation" without stating what must be validated,
-- "handle edge cases" without naming the relevant cases,
-- "write tests" without defining what behavior must be tested,
-- "check everything works" without an observable verification,
-- "similar to the previous task" when later execution depends on exact details,
-- references to files, functions, fields, tools, or artifacts that the plan never defines.
-
-Replace vague language with the actual decision, action, or acceptance criterion whenever the necessary context is available.
 
 ## Save the Plan
 
-After the plan passes self-review, save it as a Markdown file named `{taskName}-{dateTime}.md` before presenting it or starting execution. Use a short, lowercase kebab-case slug for `taskName` and the local timestamp in `YYYYMMDD-HHmmss` format for `dateTime` (for example, `add-db-status-20261003-143000.md`). Save the file in the project root, or in the current working directory if there is no project. The saved file must contain the complete, self-reviewed plan, including its task checkboxes and final verification.
+After self-review, save the complete plan to `plans/{taskName}-{dateTime}.md` in the project root:
 
-## Execution Gate
+- `taskName`: short, lowercase kebab-case slug.
+- `dateTime`: local timestamp in `YYYYMMDD-HHmmss` format.
+- Example: `plans/add-db-status-20261003-143000.md`.
 
-After the plan has been saved:
+Create `plans/` if it does not exist. When revising a plan after user feedback, update the same file instead of creating a new one.
 
-- If the user asked only for a plan, stop after presenting the plan.
-- If the user explicitly asked to approve the plan before execution, present the plan and wait for approval.
-- If the next action is irreversible, destructive, externally consequential, or requires a user decision that cannot safely be inferred, present the relevant checkpoint and wait for the required confirmation.
-- Otherwise, state that the plan is complete and begin executing it in order.
+## Handoff — Never Implement
 
-During execution:
-- Follow the plan rather than improvising silently.
-- Mark or report meaningful progress as tasks complete when useful.
-- If reality invalidates the plan, stop at the affected point, revise the remaining plan, self-review the revision, and then resume.
-- Do not preserve a bad plan merely for consistency.
+After saving:
+
+1. Present the plan briefly and include the plan file path.
+2. Stop. Do not start implementation.
+3. User approval of the plan is not permission to implement. Implementation belongs to a separate agent or an explicit new request outside this skill.
+4. If the user gives feedback, revise the same plan file and re-run self-review.
 
 ## Red Flags
 
 | Temptation | Correct behavior |
 |---|---|
-| "This is simple; I can just start." | Use a shorter plan, not no plan. |
-| "I'll do the first step while I think." | Planning and execution are separate phases. Finish the plan first. |
-| "The user gave a detailed prompt, so planning is unnecessary." | Convert the detail into an explicit execution sequence and verification criteria. |
-| "I need to ask several questions before looking at context." | Inspect available context first; ask only questions that remain material. |
-| "The plan says what to do, so verification is obvious." | State how success will be checked. |
-| "I discovered extra work, but I'm nearly done." | Stop, update the plan, self-review, then continue. |
-| "A vague step gives the executor flexibility." | Preserve flexibility in approach, not ambiguity in required outcomes. |
-
-## Planning Principles
-
-- Prefer the smallest plan that is still safe and execution-ready.
-- Be explicit about dependencies, outputs, and verification.
-- Keep scope tied to the user's goal.
-- Follow existing project conventions when working in an established environment.
-- Prefer reversible steps before irreversible ones.
-- Make hidden assumptions visible.
-- Separate exploration, planning, execution, and verification.
-- Plan enough to reduce rework; do not turn planning into the work itself.
+| "This is simple; I can just start." | Use a shorter plan, not no plan — and still do not implement. |
+| "I'll do the first step while I think." | Planning and execution are separate. This skill only plans. |
+| "The user approved, so I can implement." | Approval ends planning. Hand off. |
+| "I need to ask several questions first." | Explore context first; ask only what remains material. |
+| "The smallest local patch is enough." | Check whether it distorts the system before choosing it. |
+| "A vague step gives the executor flexibility." | Allow flexibility in approach, not ambiguity in outcomes. |
